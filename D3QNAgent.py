@@ -62,6 +62,10 @@ class DQN(keras.Model):
 
         return Q
 
+    @tf.function(
+        input_signature=[tf.TensorSpec(shape=(None, 42), dtype=tf.float32)],
+        experimental_relax_shapes=True
+    )
     def advantage(self, state):
         """calculates and returns Advantage
 
@@ -72,7 +76,6 @@ class DQN(keras.Model):
             A: Advantage
 
         """
-
         x = self.dense1(state)
         x = self.dense2(x)
         A = self.A(x)
@@ -141,8 +144,8 @@ class ReplayBuffer:
 
 class Agent:
 
-    def __init__(self, config, lr, gamma, batch_size, epsilon,
-                 eps_dec=1e-3, eps_min=1e-2, buff_size=1_000_000,
+    def __init__(self, config, lr=1e-3, gamma=0.99, batch_size=64, epsilon=0,
+                 eps_dec=0.99, eps_min=1e-2, buff_size=1_000_000,
                  d1_dims=128, d2_dims=128, replace_target_weight=10):
         """agent constructor
 
@@ -233,8 +236,7 @@ class Agent:
 
         """
 
-        self.model = keras.models.load_model(path)
-        self.target = keras.models.load_model(path)
+        self.model = keras.models.load_model(path, custom_objects={"DQN": DQN})
 
     def choose_action(self, observation):
         """method to choose an action with a given observation with
@@ -270,6 +272,15 @@ class Agent:
         return action.item()
 
     def learn(self):
+        """method to random sample from replay buffer and refit DQN
+
+        Args:
+
+
+        Returns:
+            None
+        """
+
         # if replay buffer has not been fully populated, do not learn
         if self.replay_buffer.size() < self.batch_size:
             return
@@ -316,6 +327,8 @@ class Agent:
                        shuffle=False)
 
     def evolve(self):
+        """method to copy model weights to target and decay epsilon
+        """
         # update target replace counter at the end of each episode
         self.target_replace_counter += 1
 
@@ -329,3 +342,32 @@ class Agent:
         if self.epsilon > self.eps_min:
             self.epsilon *= self.eps_dec
             self.epsilon = max(self.epsilon, self.eps_min)
+
+
+    def get_agent_reward(self, reward, done):
+        """agent reward function
+
+        Args:
+            reward: environment reward
+            done: simulation termination status
+
+        Returns:
+            agent_rewad: agent_reward
+
+        """
+
+        agent_reward = 0
+
+        if not done:
+            agent_reward += -0.5
+
+        else:
+            if reward == 0:
+                agent_reward += 10
+            elif reward == 1:
+                agent_reward += 50
+            elif reward == -1:
+                agent_reward += -30
+
+        return agent_reward
+        
