@@ -1,4 +1,5 @@
 import tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import tensorflow.keras as keras
 from tensorflow.keras.optimizers import Adam
 from collections import deque
@@ -25,11 +26,13 @@ class DQN(keras.Model):
         super(DQN, self).__init__()
 
         # define dueling double deep Q network (D3QN)
-        # because observation is a matrix of size 6 x 7, there is really
-        # no need for convolution layers, hence two dense layers are used 
-        # here
+        self.conv1 = keras.layers.Conv2D(5, 4, padding='same', activation='relu')
+        self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
+        self.conv1 = keras.layers.Conv2D(10, 4, padding='same', activation='relu')
+        self.mp2 = keras.layers.MaxPooling2D(pool_size=(2, 2))
+        self.flat1 = keras.layers.Flatten()
         self.dense1 = keras.layers.Dense(d1_dims, activation='relu')
-        self.dense2 = keras.layers.Dense(d2_dims, activation='relu')
+        self.dense2 = keras.layers.Dense(d2_dims, activation='sigmoid')
 
         # Value output
         self.V = keras.layers.Dense(1, activation=None)
@@ -51,8 +54,9 @@ class DQN(keras.Model):
             Q
         """
 
-        x = self.dense1(state)
-        x = self.dense2(x)
+        x = self.mp1(self.dense1(state))
+        x = self.mp2(self.dense2(x))
+        x = self.flat1(x)
         V = self.V(x)
         A = self.A(x)
 
@@ -63,7 +67,7 @@ class DQN(keras.Model):
         return Q
 
     @tf.function(
-        input_signature=[tf.TensorSpec(shape=(None, 42), dtype=tf.float32)],
+        input_signature=[tf.TensorSpec(shape=(None, 6, 7, 1), dtype=tf.float32)],
         experimental_relax_shapes=True
     )
     def advantage(self, state):
@@ -76,8 +80,9 @@ class DQN(keras.Model):
             A: Advantage
 
         """
-        x = self.dense1(state)
-        x = self.dense2(x)
+        x = self.mp1(self.dense1(state))
+        x = self.mp2(self.dense2(x))
+        x = self.flat1(x)
         A = self.A(x)
 
         return A
@@ -187,7 +192,7 @@ class Agent:
         self.target.compile(loss='mse', optimizer=Adam(learning_rate=lr))
 
         # copy model weights to target weights
-        self.target.set_weights(self.model.get_weights())
+        # self.target.set_weights(self.model.get_weights())
 
         # define replay buffer
         self.replay_buffer = ReplayBuffer(buff_size)
@@ -253,7 +258,7 @@ class Agent:
         # define a mask for valid actions only
         # the first n_actions elements in observation corresponds to the top row of connect 4 board
         # actions are only valid when the element equates to 0
-        mask = [True if observation[idx] == 0 else False for idx in range(self.n_actions)]
+        mask = [True if observation[0, idx, 0] == 0 else False for idx in range(self.n_actions)]
 
         # exploration
         if np.random.random() < self.epsilon:
@@ -264,8 +269,9 @@ class Agent:
         # exploitation
         else:
             # pass the current state through DQN
-            state = np.array([observation])
+            state = np.array(observation.reshape(1, 6, 7, 1))
             advantages = self.model.advantage(state).numpy().flatten()
+            # print(advantages)
             # mask off invalid actions
             valid_advantages = [advantages[idx] if mask[idx] else np.NaN for idx in range(self.n_actions)]
             action = np.nanargmax(valid_advantages)
@@ -363,7 +369,7 @@ class Agent:
 
         else:
             if reward == 0:
-                agent_reward += 10
+                agent_reward += 15
             elif reward == 1:
                 agent_reward += 50
             elif reward == -1:
