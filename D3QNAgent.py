@@ -367,7 +367,7 @@ class Agent:
             elif reward == 1:
                 agent_reward += 50
             elif reward == -1:
-                agent_reward += -30
+                agent_reward += -25
 
         return agent_reward
         
