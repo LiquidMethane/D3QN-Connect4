@@ -9,7 +9,7 @@ import random
 
 class DQN(keras.Model):
 
-    def __init__(self, n_actions, d1_dims, d2_dims):
+    def __init__(self, n_actions, conv1_filts=3, conv2_filts=6, d1_dims=128, d2_dims=128):
         """D3QN class constructor
 
         Args:
@@ -26,13 +26,13 @@ class DQN(keras.Model):
         super(DQN, self).__init__()
 
         # define dueling double deep Q network (D3QN)
-        self.conv1 = keras.layers.Conv2D(5, 4, padding='same', activation='relu')
+        self.conv1 = keras.layers.Conv2D(conv1_filts, 4, padding='same', activation='relu')
         self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
-        self.conv1 = keras.layers.Conv2D(10, 4, padding='same', activation='relu')
+        self.conv2 = keras.layers.Conv2D(conv2_filts, 4, padding='same', activation='relu')
         self.mp2 = keras.layers.MaxPooling2D(pool_size=(2, 2))
         self.flat1 = keras.layers.Flatten()
         self.dense1 = keras.layers.Dense(d1_dims, activation='relu')
-        self.dense2 = keras.layers.Dense(d2_dims, activation='sigmoid')
+        self.dense2 = keras.layers.Dense(d2_dims, activation='relu')
 
         # Value output
         self.V = keras.layers.Dense(1, activation=None)
@@ -54,9 +54,10 @@ class DQN(keras.Model):
             Q
         """
 
-        x = self.mp1(self.dense1(state))
-        x = self.mp2(self.dense2(x))
-        x = self.flat1(x)
+        x = self.mp1(self.conv1(state))
+        x = self.mp2(self.conv2(x))
+        x = self.dense1(self.flat1(x))
+        x = self.dense2(x)
         V = self.V(x)
         A = self.A(x)
 
@@ -80,9 +81,10 @@ class DQN(keras.Model):
             A: Advantage
 
         """
-        x = self.mp1(self.dense1(state))
-        x = self.mp2(self.dense2(x))
-        x = self.flat1(x)
+        x = self.mp1(self.conv1(state))
+        x = self.mp2(self.conv2(x))
+        x = self.dense1(self.flat1(x))
+        x = self.dense2(x)
         A = self.A(x)
 
         return A
@@ -151,7 +153,8 @@ class Agent:
 
     def __init__(self, config, lr=1e-3, gamma=0.99, batch_size=64, epsilon=0,
                  eps_dec=0.99, eps_min=1e-2, buff_size=1_000_000,
-                 d1_dims=128, d2_dims=128, replace_target_weight=10):
+                 conv1_filts=3, conv2_filts=6, d1_dims=128, d2_dims=128, 
+                 replace_target_weight=10):
         """agent constructor
 
         Args:
@@ -183,8 +186,8 @@ class Agent:
         self.batch_size = batch_size
 
         # define model and target
-        self.model = DQN(self.n_actions, d1_dims, d2_dims)
-        self.target = DQN(self.n_actions, d1_dims, d2_dims)
+        self.model = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
+        self.target = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
 
         # compile models
         self.model.compile(loss='mse', optimizer=Adam(learning_rate=lr))
@@ -192,7 +195,7 @@ class Agent:
         self.target.compile(loss='mse', optimizer=Adam(learning_rate=lr))
 
         # copy model weights to target weights
-        # self.target.set_weights(self.model.get_weights())
+        self.target.set_weights(self.model.get_weights())
 
         # define replay buffer
         self.replay_buffer = ReplayBuffer(buff_size)
@@ -275,6 +278,7 @@ class Agent:
             # mask off invalid actions
             valid_advantages = [advantages[idx] if mask[idx] else np.NaN for idx in range(self.n_actions)]
             action = np.nanargmax(valid_advantages)
+            
         return action.item()
 
     def learn(self):
