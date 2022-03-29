@@ -26,11 +26,11 @@ class DQN(keras.Model):
         super(DQN, self).__init__()
 
         # define dueling double deep Q network (D3QN)
-        self.conv1 = keras.layers.Conv2D(conv1_filts, 4, padding='same', activation='relu')
-        self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
-        self.conv2 = keras.layers.Conv2D(conv2_filts, 4, padding='same', activation='relu')
-        self.mp2 = keras.layers.MaxPooling2D(pool_size=(2, 2))
-        self.flat1 = keras.layers.Flatten()
+        # self.conv1 = keras.layers.Conv2D(conv1_filts, 4, padding='same', activation='relu')
+        # self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
+        # self.conv2 = keras.layers.Conv2D(conv2_filts, 4, padding='same', activation='relu')
+        # self.mp2 = keras.layers.MaxPooling2D(pool_size=(2, 2))
+        # self.flat1 = keras.layers.Flatten()
         self.dense1 = keras.layers.Dense(d1_dims, activation='relu')
         self.dense2 = keras.layers.Dense(d2_dims, activation='relu')
 
@@ -54,9 +54,14 @@ class DQN(keras.Model):
             Q
         """
 
-        x = self.mp1(self.conv1(state))
-        x = self.mp2(self.conv2(x))
-        x = self.dense1(self.flat1(x))
+        # x = self.mp1(self.conv1(state))
+        # x = self.mp2(self.conv2(x))
+        # x = self.dense1(self.flat1(x))
+        # x = self.dense2(x)
+        # V = self.V(x)
+        # A = self.A(x)
+
+        x = self.dense1(state)
         x = self.dense2(x)
         V = self.V(x)
         A = self.A(x)
@@ -67,8 +72,12 @@ class DQN(keras.Model):
 
         return Q
 
+    # @tf.function(
+    #     input_signature=[tf.TensorSpec(shape=(None, 6, 7, 1), dtype=tf.float32)],
+    #     experimental_relax_shapes=True
+    # )
     @tf.function(
-        input_signature=[tf.TensorSpec(shape=(None, 6, 7, 1), dtype=tf.float32)],
+        input_signature=[tf.TensorSpec(shape=(None, 42), dtype=tf.float32)],
         experimental_relax_shapes=True
     )
     def advantage(self, state):
@@ -81,9 +90,13 @@ class DQN(keras.Model):
             A: Advantage
 
         """
-        x = self.mp1(self.conv1(state))
-        x = self.mp2(self.conv2(x))
-        x = self.dense1(self.flat1(x))
+        # x = self.mp1(self.conv1(state))
+        # x = self.mp2(self.conv2(x))
+        # x = self.dense1(self.flat1(x))
+        # x = self.dense2(x)
+        # A = self.A(x)
+
+        x = self.dense1(state)
         x = self.dense2(x)
         A = self.A(x)
 
@@ -181,6 +194,7 @@ class Agent:
         # store parameters as member variables
         self.gamma = gamma
         self.epsilon = epsilon
+        self.epsilon_init = epsilon
         self.eps_dec = eps_dec
         self.eps_min = eps_min
         self.batch_size = batch_size
@@ -201,7 +215,7 @@ class Agent:
         self.replay_buffer = ReplayBuffer(buff_size)
 
         # define replace_target_weight_threshold and counter
-        self.target_replace_counter = 0
+        self.counter = 0
         self.replace_target_weight = replace_target_weight
 
         pass
@@ -231,7 +245,7 @@ class Agent:
             None
         """
 
-        self.target.save(path)
+        self.model.save(path)
 
     def load_model(self, path):
         """load the model weights from a file
@@ -243,7 +257,7 @@ class Agent:
             None
 
         """
-
+        
         self.model = keras.models.load_model(path, custom_objects={"DQN": DQN})
 
     def choose_action(self, observation):
@@ -261,7 +275,8 @@ class Agent:
         # define a mask for valid actions only
         # the first n_actions elements in observation corresponds to the top row of connect 4 board
         # actions are only valid when the element equates to 0
-        mask = [True if observation[0, idx, 0] == 0 else False for idx in range(self.n_actions)]
+        # mask = [True if observation[0, idx, 0] == 0 else False for idx in range(self.n_actions)]
+        mask = [True if observation[idx] == 0 else False for idx in range(self.n_actions)]
 
         # exploration
         if np.random.random() < self.epsilon:
@@ -272,13 +287,17 @@ class Agent:
         # exploitation
         else:
             # pass the current state through DQN
-            state = np.array(observation.reshape(1, 6, 7, 1))
-            advantages = self.model.advantage(state).numpy().flatten()
+            # state = np.array(observation.reshape(1, 6, 7, 1))
+            # advantages = self.model.advantage(state).numpy().flatten()
+            advantages = self.model.advantage([observation]).numpy().flatten()
             # print(advantages)
             # mask off invalid actions
             valid_advantages = [advantages[idx] if mask[idx] else np.NaN for idx in range(self.n_actions)]
             action = np.nanargmax(valid_advantages)
-            
+            # print(observation.reshape(6, 7))
+            # print(valid_advantages)
+            # print(action)
+
         return action.item()
 
     def learn(self):
@@ -331,26 +350,24 @@ class Agent:
 
             pass
 
-        # refit the model with minibatch
-        self.model.fit(np.array(X), np.array(y),
-                       batch_size=self.batch_size, verbose=0,
-                       shuffle=False)
+        # take one gradient descent step
+        self.model.train_on_batch(np.array(X), np.array(y))
 
     def evolve(self):
         """method to copy model weights to target and decay epsilon
         """
         # update target replace counter at the end of each episode
-        self.target_replace_counter += 1
+        self.counter += 1
 
         # replace target weights with model weights 
-        if self.target_replace_counter > self.replace_target_weight:
+        if self.counter % self.replace_target_weight == 0:
             self.target.set_weights(self.model.get_weights())
-            self.target_replace_counter = 0
+            # self.counter = 0
             # print('Target model weights updated.')
 
         # Decay epsilon
         if self.epsilon > self.eps_min:
-            self.epsilon *= self.eps_dec
+            self.epsilon = np.exp((self.eps_dec - 1) * self.counter)
             self.epsilon = max(self.epsilon, self.eps_min)
 
 
@@ -369,7 +386,7 @@ class Agent:
         agent_reward = 0
 
         if not done:
-            agent_reward += -0.5
+            agent_reward += -0.1
 
         else:
             if reward == 0:
@@ -377,7 +394,10 @@ class Agent:
             elif reward == 1:
                 agent_reward += 50
             elif reward == -1:
-                agent_reward += -30
+                agent_reward += -25
 
         return agent_reward
         
+
+    def reset_epsilon(self):
+        self.epsilon = self.epsilon_init
