@@ -9,7 +9,7 @@ import random
 
 class DQN(keras.Model):
 
-    def __init__(self, n_actions, conv1_filts=3, conv2_filts=6, d1_dims=128, d2_dims=128):
+    def __init__(self, n_actions, conv1_filts=16, conv2_filts=6, d1_dims=128, d2_dims=128):
         """D3QN class constructor
 
         Args:
@@ -26,11 +26,9 @@ class DQN(keras.Model):
         super(DQN, self).__init__()
 
         # define dueling double deep Q network (D3QN)
-        # self.conv1 = keras.layers.Conv2D(conv1_filts, 4, padding='same', activation='relu')
-        # self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
-        # self.conv2 = keras.layers.Conv2D(conv2_filts, 4, padding='same', activation='relu')
-        # self.mp2 = keras.layers.MaxPooling2D(pool_size=(2, 2))
-        # self.flat1 = keras.layers.Flatten()
+        self.conv1 = keras.layers.Conv2D(conv1_filts, 4, padding='valid', activation='relu')
+        self.mp1 = keras.layers.MaxPooling2D(pool_size=(2, 2))
+        self.flat1 = keras.layers.Flatten()
         self.dense1 = keras.layers.Dense(d1_dims, activation='relu')
         self.dense2 = keras.layers.Dense(d2_dims, activation='relu')
 
@@ -54,14 +52,10 @@ class DQN(keras.Model):
             Q
         """
 
-        # x = self.mp1(self.conv1(state))
-        # x = self.mp2(self.conv2(x))
-        # x = self.dense1(self.flat1(x))
-        # x = self.dense2(x)
-        # V = self.V(x)
-        # A = self.A(x)
-
-        x = self.dense1(state)
+        x = self.conv1(state)
+        x = self.mp1(x)
+        x = self.flat1(x)
+        x = self.dense1(x)
         x = self.dense2(x)
         V = self.V(x)
         A = self.A(x)
@@ -76,10 +70,6 @@ class DQN(keras.Model):
     #     input_signature=[tf.TensorSpec(shape=(None, 6, 7, 1), dtype=tf.float32)],
     #     experimental_relax_shapes=True
     # )
-    @tf.function(
-        input_signature=[tf.TensorSpec(shape=(None, 42), dtype=tf.float32)],
-        experimental_relax_shapes=True
-    )
     def advantage(self, state):
         """calculates and returns Advantage
 
@@ -90,13 +80,11 @@ class DQN(keras.Model):
             A: Advantage
 
         """
-        # x = self.mp1(self.conv1(state))
-        # x = self.mp2(self.conv2(x))
-        # x = self.dense1(self.flat1(x))
-        # x = self.dense2(x)
-        # A = self.A(x)
 
-        x = self.dense1(state)
+        x = self.conv1(state)
+        x = self.mp1(x)
+        x = self.flat1(x)
+        x = self.dense1(x)
         x = self.dense2(x)
         A = self.A(x)
 
@@ -166,8 +154,8 @@ class Agent:
 
     def __init__(self, config, lr=1e-3, gamma=0.99, batch_size=64, epsilon=0,
                  eps_dec=0.99, eps_min=1e-2, buff_size=1_000_000,
-                 conv1_filts=3, conv2_filts=6, d1_dims=128, d2_dims=128, 
-                 replace_target_weight=10):
+                 conv1_filts=16, conv2_filts=6, d1_dims=128, d2_dims=128, 
+                 replace_target_weight=10, input_shape = (None, 6, 7, 1), testing=False):
         """agent constructor
 
         Args:
@@ -191,34 +179,47 @@ class Agent:
         # extract number of actions from environment configuration
         self.n_actions = config.columns
 
-        # store parameters as member variables
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_init = epsilon
-        self.eps_dec = eps_dec
-        self.eps_min = eps_min
-        self.batch_size = batch_size
 
-        # define model and target
-        self.model = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
-        self.target = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
+        if testing:
+            self.online = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
+            self.online.build(input_shape)
+            self.online.compile(loss='mse', optimizer=Adam(learning_rate=lr))
+            self.epsilon = 0
 
-        # compile models
-        self.model.compile(loss='mse', optimizer=Adam(learning_rate=lr))
-        # won't actually optimize
-        self.target.compile(loss='mse', optimizer=Adam(learning_rate=lr))
 
-        # copy model weights to target weights
-        self.target.set_weights(self.model.get_weights())
+        else:
+            # store parameters as member variables
+            self.gamma = gamma
+            self.epsilon = epsilon
+            self.epsilon_init = epsilon
+            self.eps_dec = eps_dec
+            self.eps_min = eps_min
+            self.batch_size = batch_size
+            self.input_shape = input_shape
 
-        # define replay buffer
-        self.replay_buffer = ReplayBuffer(buff_size)
+            # define model and target
+            self.online = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
+            self.target = DQN(self.n_actions, conv1_filts, conv2_filts, d1_dims, d2_dims)
 
-        # define replace_target_weight_threshold and counter
-        self.counter = 0
-        self.replace_target_weight = replace_target_weight
+            # build model with input shape
+            self.online.build(input_shape)
+            self.target.build(input_shape)
 
-        pass
+            # compile models
+            self.online.compile(loss='mse', optimizer=Adam(learning_rate=lr))
+            # won't actually optimize
+            self.target.compile(loss='mse', optimizer=Adam(learning_rate=lr))
+
+            # copy model weights to target weights
+            self.target.set_weights(self.online.get_weights())
+
+            # define replay buffer
+            self.replay_buffer = ReplayBuffer(buff_size)
+
+            # define replace_target_weight_threshold and counter
+            self.counter = 0
+            self.replace_target_weight = replace_target_weight
+
 
     def update_replay_buffer(self, transition):
         """method to update replay buffer with new transition
@@ -235,30 +236,6 @@ class Agent:
 
         pass
 
-    def save_model(self, path):
-        """save the target model weights to a file
-
-        Args:
-            path: filepath
-
-        Returns:
-            None
-        """
-
-        self.model.save(path)
-
-    def load_model(self, path):
-        """load the model weights from a file
-
-        Args:
-            path: filepath
-
-        Returns:
-            None
-
-        """
-        
-        self.model = keras.models.load_model(path, custom_objects={"DQN": DQN})
 
     def choose_action(self, observation):
         """method to choose an action with a given observation with
@@ -272,11 +249,13 @@ class Agent:
 
         """
 
+        obs = np.sum(observation, 2).flatten()
+
         # define a mask for valid actions only
         # the first n_actions elements in observation corresponds to the top row of connect 4 board
         # actions are only valid when the element equates to 0
-        # mask = [True if observation[0, idx, 0] == 0 else False for idx in range(self.n_actions)]
-        mask = [True if observation[idx] == 0 else False for idx in range(self.n_actions)]
+        # mask = [True if obs[0, idx, 0] == 0 else False for idx in range(self.n_actions)]
+        mask = [True if obs[idx] == 0 else False for idx in range(self.n_actions)]
 
         # exploration
         if np.random.random() < self.epsilon:
@@ -289,14 +268,14 @@ class Agent:
             # pass the current state through DQN
             # state = np.array(observation.reshape(1, 6, 7, 1))
             # advantages = self.model.advantage(state).numpy().flatten()
-            advantages = self.model.advantage([observation]).numpy().flatten()
-            # print(advantages)
+            # print(observation.shape)
+            advantages = self.online.advantage([observation]).numpy().flatten()
+            
             # mask off invalid actions
             valid_advantages = [advantages[idx] if mask[idx] else np.NaN for idx in range(self.n_actions)]
             action = np.nanargmax(valid_advantages)
-            # print(observation.reshape(6, 7))
-            # print(valid_advantages)
-            # print(action)
+            # print(np.round(advantages, 3), action)
+            # print('exploit')
 
         return action.item()
 
@@ -319,7 +298,7 @@ class Agent:
 
         # extract current states and predict current Q's
         curr_states_list = np.array([transition[0] for transition in batch])
-        curr_Qs_list = self.model.predict(curr_states_list)
+        curr_Qs_list = self.online.predict(curr_states_list)
 
         # extract next states and predict next Q's
         next_states_list = np.array([transition[3] for transition in batch])
@@ -351,7 +330,7 @@ class Agent:
             pass
 
         # take one gradient descent step
-        self.model.train_on_batch(np.array(X), np.array(y))
+        self.online.train_on_batch(np.array(X), np.array(y))
 
     def evolve(self):
         """method to copy model weights to target and decay epsilon
@@ -361,7 +340,7 @@ class Agent:
 
         # replace target weights with model weights 
         if self.counter % self.replace_target_weight == 0:
-            self.target.set_weights(self.model.get_weights())
+            self.target.set_weights(self.online.get_weights())
             # self.counter = 0
             # print('Target model weights updated.')
 
@@ -386,18 +365,24 @@ class Agent:
         agent_reward = 0
 
         if not done:
-            agent_reward += -0.1
+            agent_reward += -0.5
 
-        else:
+        if done:
             if reward == 0:
-                agent_reward += 15
+                agent_reward = -5
             elif reward == 1:
-                agent_reward += 50
+                agent_reward = 50
             elif reward == -1:
-                agent_reward += -25
+                agent_reward = -25
 
         return agent_reward
         
 
     def reset_epsilon(self):
         self.epsilon = self.epsilon_init
+
+    def load_DQN_weights(self, path):
+        self.online.load_weights(path)
+
+    def save_DQN_weights(self, path):
+        self.online.save_weights(path, save_format='h5')
