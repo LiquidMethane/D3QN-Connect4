@@ -1,3 +1,8 @@
+# Hyperparameter selection
+# - learning rate (0.001, 0.0005)
+# - batch size (64, 128)
+# - gamma (0.95, 0.99)
+# - replace target weight (10, 20)
 
 from tqdm import tqdm
 from D3QNAgent import Agent
@@ -68,7 +73,7 @@ def train_agent(idx, lr, batch_size, gamma, replace_weight):
     trainer = env.train([nsl_agent, None])
 
     # define training episodes
-    num_episodes = 20
+    num_episodes = 5000
 
     # training procedure
     for i in tqdm(range(num_episodes)):
