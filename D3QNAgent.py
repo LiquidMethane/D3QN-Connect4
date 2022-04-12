@@ -1,4 +1,5 @@
 import tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import tensorflow.keras as keras
 from tensorflow.keras.optimizers import Adam
 from collections import deque
@@ -152,7 +153,8 @@ class Agent:
 
     def __init__(self, config, lr=1e-3, gamma=0.99, batch_size=64, epsilon=0,
                  eps_dec=0.99, eps_min=1e-2, buff_size=1_000_000,
-                 d1_dims=64, d2_dims=64,d3_dims = 32, d4_dims = 32, replace_target_weight=10):
+                 d1_dims=64, d2_dims=64,d3_dims = 32, d4_dims = 32, replace_target_weight=10, 
+                 testing=False):
 
         """agent constructor
 
@@ -185,16 +187,19 @@ class Agent:
         self.batch_size = batch_size
 
         # define model and target
-        self.model = DQN(self.n_actions, d1_dims, d2_dims, d3_dims, d4_dims)
+        self.online = DQN(self.n_actions, d1_dims, d2_dims, d3_dims, d4_dims)
         self.target = DQN(self.n_actions, d1_dims, d2_dims, d3_dims, d4_dims)
 
         # compile models
-        self.model.compile(loss='mse', optimizer=Adam(learning_rate=lr))
+        self.online.compile(loss='mse', optimizer=Adam(learning_rate=lr))
         # won't actually optimize
         self.target.compile(loss='mse', optimizer=Adam(learning_rate=lr))
+        
+        #self.online.build(input_shape)
+        #self.target.build(input_shape)
 
         # copy model weights to target weights
-        self.target.set_weights(self.model.get_weights())
+        self.online.set_weights(self.online.get_weights())
 
         # define replay buffer
         self.replay_buffer = ReplayBuffer(buff_size)
@@ -219,6 +224,8 @@ class Agent:
         self.replay_buffer.update_buffer(transition)
 
         pass
+    
+
 
     def save_model(self, path):
         """save the target model weights to a file
@@ -244,17 +251,15 @@ class Agent:
         """
 
         self.model = keras.models.load_model(path, custom_objects={"DQN": DQN})
-
+        
+        
     def choose_action(self, observation):
         """method to choose an action with a given observation with
         epsilon greedy policy
-
         Args:
             observation: the current observation from the environment
-
         Returns:
             action: the action chosen
-
         """
 
         # define a mask for valid actions only
@@ -272,7 +277,7 @@ class Agent:
         else:
             # pass the current state through DQN
             state = np.array([observation])
-            advantages = self.model.advantage(state).numpy().flatten()
+            advantages = self.online.advantage(state).numpy().flatten()
             # mask off invalid actions
             valid_advantages = [advantages[idx] if mask[idx] else np.NaN for idx in range(self.n_actions)]
             action = np.nanargmax(valid_advantages)
@@ -297,7 +302,7 @@ class Agent:
 
         # extract current states and predict current Q's
         curr_states_list = np.array([transition[0] for transition in batch])
-        curr_Qs_list = self.model.predict(curr_states_list)
+        curr_Qs_list = self.online.predict(curr_states_list)
 
         # extract next states and predict next Q's
         next_states_list = np.array([transition[3] for transition in batch])
@@ -325,13 +330,13 @@ class Agent:
             # append this traning sample for DQN model refit
             X.append(state)
             y.append(curr_Qs)
+            
 
             pass
 
         # refit the model with minibatch
-        self.model.fit(np.array(X), np.array(y),
-                       batch_size=self.batch_size, verbose=0,
-                       shuffle=False)
+        #self.model.fit(np.array(X), np.array(y),batch_size=self.batch_size, verbose=0,shuffle=False)
+        self.online.train_on_batch(np.array(X), np.array(y))
 
     def evolve(self):
         """method to copy model weights to target and decay epsilon
@@ -341,7 +346,7 @@ class Agent:
 
         # replace target weights with model weights 
         if self.target_replace_counter > self.replace_target_weight:
-            self.target.set_weights(self.model.get_weights())
+            self.target.set_weights(self.online.get_weights())
             self.target_replace_counter = 0
             # print('Target model weights updated.')
 
@@ -377,4 +382,14 @@ class Agent:
                 agent_reward += -25
 
         return agent_reward
+    
+    
+    def reset_epsilon(self):
+        self.epsilon = self.epsilon_init
+
+    def load_DQN_weights(self, path):
+        self.online.load_weights(path)
+
+    def save_DQN_weights(self, path):
+        self.online.save_weights(path, save_format='h5')
         
